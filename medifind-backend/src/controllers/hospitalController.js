@@ -1,0 +1,555 @@
+import { Router } from 'express';
+import Hospital from '../models/Hospital.js';
+import User from '../models/User.js';
+import Admin from '../models/hospitalAdmin.js';
+import mongoose from 'mongoose';
+import {v2 as cloudinary} from "cloudinary";
+
+// Cloudinary configuration 
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const router = Router();
+
+// Image upload route
+export const uploadImages = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'No files uploaded',
+      });
+    }
+
+    const uploadPromises = req.files.map(file => {
+      return cloudinary.uploader.upload(file.path, {
+        folder: 'hospitals'
+      });
+    });
+
+    const results = await Promise.all(uploadPromises);
+    const urls = results.map(result => result.secure_url);
+
+    res.status(200).json({
+      status: 'success',
+      data: { urls },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: `Failed to upload images: ${error.message}`,
+    });
+  }
+};
+
+// Get all hospitals
+export const getAllHospitals = async (req, res) => {
+  try {
+    const hospitals = await Hospital.find().select('-__v');
+    res.status(200).json({
+      status: 'success',
+      hospitals: { hospitals },
+    });
+  } catch (error) {
+    console.error('Error fetching hospitals:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch hospitals',
+    });
+  }
+};
+
+// Get hospital by ID
+export const getHospital = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid hospital ID',
+      });
+    }
+    const hospital = await Hospital.findById(req.params.id).select('-__v');
+    if (!hospital) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No hospital found with that ID',
+      });
+    }
+    res.status(200).json({
+      status: 'success',
+      data: { hospital },
+    });
+  } catch (error) {
+    console.error('Error fetching hospital:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch hospital',
+    });
+  }
+};
+
+export const createHospital = async (req, res) => {
+  try {
+    // 1. Input Validation
+    const requiredFields = ['name', 'district', 'sector', 'cell', 'type', 'description', 'email', 'phone', 'specialties', 'services', 'hospitalAdmin'];
+    const missingFields = requiredFields.filter((field) => !req.body[field] && req.body[field] !== '');
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Missing required fields: ${missingFields.join(', ')}`,
+        fields: missingFields,
+      });
+    }
+
+    // 2. Email Validation
+    if (!req.body.email || typeof req.body.email !== 'string' || req.body.email.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email must be a non-empty string',
+        field: 'email',
+      });
+    }
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(req.body.email.trim())) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Email must be a valid email address',
+        field: 'email',
+      });
+    }
+
+    // 3. Phone Validation
+    if (!req.body.phone || typeof req.body.phone !== 'string' || req.body.phone.trim() === '') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Phone number must be a non-empty string',
+        field: 'phone',
+      });
+    }
+    if (!/^\+?[1-9]\d{1,14}$/.test(req.body.phone.trim())) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Phone number must be a valid phone number',
+        field: 'phone',
+      });
+    }
+
+    // 4. Normalize Name for Case-Insensitive Uniqueness
+    const normalizedName = req.body.name.trim().toLowerCase();
+
+    // 5. Check for Existing Hospital by Name
+    const existingHospital = await Hospital.findOne({
+      name: { $regex: `^${normalizedName}$`, $options: 'i' }
+    });
+    if (existingHospital) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'Hospital with this name already exists',
+        field: 'name',
+      });
+    }
+
+    // 6. Validate Type
+    const validTypes = [
+      'Referral Hospital',
+      'District Hospital',
+      'Private Hospital',
+      'Specialized Hospital',
+      'Health Center'
+    ];
+    if (!validTypes.includes(req.body.type)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: `Type must be one of: ${validTypes.join(', ')}`,
+        field: 'type',
+      });
+    }
+
+    // 7. Data Transformation
+    const arrayFields = ['specialties', 'services', 'facilities', 'images'];
+    const transformedBody = { ...req.body, name: req.body.name.trim() }; // Preserve original name case
+    arrayFields.forEach((field) => {
+      if (transformedBody[field] && typeof transformedBody[field] === 'string') {
+        transformedBody[field] = transformedBody[field]
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+      }
+      if (transformedBody[field] && !Array.isArray(transformedBody[field])) {
+        transformedBody[field] = [transformedBody[field]];
+      }
+    });
+
+    // 8. Handle image uploads to Cloudinary
+    if (req.files && req.files.length > 0) {
+      const uploadPromises = req.files.map(file => {
+        return cloudinary.uploader.upload(file.path, {
+          folder: 'hospitals'
+        });
+      });
+
+      const results = await Promise.all(uploadPromises);
+      transformedBody.images = results.map(result => result.secure_url);
+    }
+
+    // 9. Validate Array Fields
+    if (!Array.isArray(transformedBody.specialties) || transformedBody.specialties.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'At least one specialty is required',
+        field: 'specialties',
+      });
+    }
+    if (!Array.isArray(transformedBody.services) || transformedBody.services.length === 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'At least one service is required',
+        field: 'services',
+      });
+    }
+
+    // 10. Rating Validation
+    if (transformedBody.rating && (transformedBody.rating < 0 || transformedBody.rating > 5)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Rating must be between 0 and 5',
+        field: 'rating',
+      });
+    }
+
+    // 11. Working Days Validation
+    if (transformedBody.workingDays) {
+      const validDays = [
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday',
+      ];
+      const invalidDays = Object.keys(transformedBody.workingDays).filter(
+        (day) => !validDays.includes(day)
+      );
+      if (invalidDays.length > 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Invalid working days: ${invalidDays.join(', ')}`,
+          fields: invalidDays.map((day) => `workingDays.${day}`),
+        });
+      }
+      for (const day of validDays) {
+        if (
+          transformedBody.workingDays[day] !== undefined &&
+          typeof transformedBody.workingDays[day] !== 'boolean'
+        ) {
+          return res.status(400).json({
+            status: 'fail',
+            message: `workingDays.${day} must be a boolean`,
+            field: `workingDays.${day}`,
+          });
+        }
+      }
+    }
+
+    // 12. URL Validation for logo and website
+    const urlFields = ['logo', 'website'];
+    for (const field of urlFields) {
+      if (
+        transformedBody[field] &&
+        !/^https?:\/\/\S+$/.test(transformedBody[field])
+      ) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `${field} must be a valid URL`,
+          field,
+        });
+      }
+    }
+
+    // 13. Other Validations
+    if (transformedBody.beds && transformedBody.beds < 0) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Number of beds cannot be negative',
+        field: 'beds',
+      });
+    }
+    if (transformedBody.founded) {
+      const currentYear = new Date().getFullYear();
+      if (transformedBody.founded < 1800 || transformedBody.founded > currentYear) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Founded year must be between 1800 and ${currentYear}`,
+          field: 'founded',
+        });
+      }
+    }
+    if (transformedBody.status && !['active', 'inactive', 'pending'].includes(transformedBody.status)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Status must be one of: active, inactive, pending',
+        field: 'status',
+      });
+    }
+
+    // 14. Create Hospital
+    const newHospital = await Hospital.create(transformedBody);
+
+    // 15. Response
+    res.status(201).json({
+      status: 'success',
+      data: { hospital: newHospital },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      console.error('Duplicate key error:', error.keyValue);
+      return res.status(409).json({
+        status: 'fail',
+        message: `Duplicate value for field: ${JSON.stringify(error.keyValue)}`,
+        field: Object.keys(error.keyValue)[0],
+      });
+    }
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map((el) => ({
+        field: el.path,
+        message: el.message,
+      }));
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Validation failed',
+        errors,
+      });
+    }
+    console.error('Error creating hospital:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error while creating hospital',
+    });
+  }
+};
+
+// Update hospital
+export const updateHospital = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid hospital ID',
+      });
+    }
+
+    // Transform array fields
+    const arrayFields = ['specialties', 'services', 'facilities', 'images'];
+    const transformedBody = { ...req.body };
+    arrayFields.forEach((field) => {
+      if (transformedBody[field] && typeof transformedBody[field] === 'string') {
+        transformedBody[field] = transformedBody[field]
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+      }
+    });
+
+    // Handle image uploads to Cloudinary
+    if (req.files && req.files.length > 0) {
+      const uploadPromises = req.files.map(file => {
+        return cloudinary.uploader.upload(file.path, {
+          folder: 'hospitals'
+        });
+      });
+
+      const results = await Promise.all(uploadPromises);
+      transformedBody.images = results.map(result => result.secure_url);
+    }
+
+    // Validate workingDays if provided
+    if (transformedBody.workingDays) {
+      const validDays = [
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday',
+      ];
+      const invalidDays = Object.keys(transformedBody.workingDays).filter(
+        (day) => !validDays.includes(day)
+      );
+      if (invalidDays.length > 0) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Invalid working days: ${invalidDays.join(', ')}`,
+          fields: invalidDays.map((day) => `workingDays.${day}`),
+        });
+      }
+      for (const day of validDays) {
+        if (
+          transformedBody.workingDays[day] !== undefined &&
+          typeof transformedBody.workingDays[day] !== 'boolean'
+        ) {
+          return res.status(400).json({
+            status: 'fail',
+            message: `workingDays.${day} must be a boolean`,
+            field: `workingDays.${day}`,
+          });
+        }
+      }
+    }
+
+    // Validate URLs
+    const urlFields = ['logo', 'website'];
+    for (const field of urlFields) {
+      if (
+        transformedBody[field] &&
+        !/^https?:\/\/\S+$/.test(transformedBody[field])
+      ) {
+        return res.status(400).json({
+          status: 'fail',
+          message: `${field} must be a valid URL`,
+          field,
+        });
+      }
+    }
+
+    const hospital = await Hospital.findByIdAndUpdate(
+      req.params.id,
+      transformedBody,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!hospital) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No hospital found with that ID',
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { hospital },
+    });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map((el) => ({
+        field: el.path,
+        message: el.message,
+      }));
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Validation failed',
+        errors,
+      });
+    }
+    console.error('Error updating hospital:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update hospital',
+    });
+  }
+};
+
+// Delete hospital
+export const deleteHospital = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid hospital ID',
+      });
+    }
+    
+    const hospital = await Hospital.findById(req.params.id);
+    if (!hospital) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No hospital found with that ID',
+      });
+    }
+
+    // Delete images from Cloudinary
+    if (hospital.images && hospital.images.length > 0) {
+      const deletePromises = hospital.images.map(imageUrl => {
+        const publicId = imageUrl.split('/').pop().split('.')[0];
+        return cloudinary.uploader.destroy(`hospitals/${publicId}`);
+      });
+      await Promise.all(deletePromises);
+    }
+
+    await Hospital.findByIdAndDelete(req.params.id);
+    
+    res.status(204).json({
+      status: 'success',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error deleting hospital:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to delete hospital',
+    });
+  }
+};
+
+// Search hospitals
+export const getSearchedHospitals = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Search query is required',
+      });
+    }
+
+    const hospitals = await Hospital.find({
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { district: { $regex: query, $options: 'i' } },
+        { sector: { $regex: query, $options: 'i' } },
+        { cell: { $regex: query, $options: 'i' } },
+        { type: { $regex: query, $options: 'i' } },
+        { specialties: { $regex: query, $options: 'i' } },
+        { services: { $regex: query, $options: 'i' } },
+      ],
+    });
+
+    res.status(200).json({
+      status: 'success',
+      results: hospitals.length,
+      data: { hospitals },
+    });
+  } catch (error) {
+    console.error('Error searching hospitals:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to search hospitals',
+    });
+  }
+};
+
+export const getHospitalAdmins = async(req, res) => {
+
+  try {
+        const admins = await Admin.find({ role: 'hospital_admin'});
+
+      if(admins){
+        res.status(201).json({ sucess: true, message:"admins Fetched", Admins : admins })
+      }else{
+        res.status(401).json({sucess: false, message: "failed to fetch admins"})
+      }
+  } catch (error) {
+    res.status(500).json({sucess: false, message: "server error"})
+     
+    
+  }
+
+}
