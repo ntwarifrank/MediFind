@@ -154,8 +154,6 @@ const hospitalSchema = new mongoose.Schema({
   ],
 });
 
-// Add case-insensitive unique index on name
-hospitalSchema.index({ name: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
 
 const Hospital = mongoose.model('Hospital', hospitalSchema);
 export default Hospital;

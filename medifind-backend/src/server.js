@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import connectDB from './config/database.js';
 import multer from 'multer';
+import { uploadImages } from './controllers/hospitalController.js';
 import { login, register, getCurrentUser, registerAdmin, adminlogin} from './controllers/authController.js';
 import {
   createAppointment,
@@ -29,7 +30,8 @@ import {
   getHospital,
   getAllHospitals,
   getSearchedHospitals,
-  getHospitalAdmins
+  getHospitalAdmins,
+  getHospitalAdmin,
 } from './controllers/hospitalController.js';
 
 import { 
@@ -49,7 +51,8 @@ const router = express.Router();
 // Initialize express app
 const app = express();
 
-
+// Store files in memory for Cloudinary upload
+const upload = multer({ dest: 'uploads/' });
 
 // Connect to database
 connectDB();
@@ -67,28 +70,6 @@ app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads')));
 app.use(router);
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'Uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const upload = multer({
-  storage,
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = filetypes.test(file.mimetype);
-    if (extname && mimetype) {
-      return cb(null, true);
-    }
-    cb(new Error('Only JPEG and PNG images are allowed'));
-  },
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-});
 
 // Welcome route
 app.get('/', (req, res) => {
@@ -98,35 +79,16 @@ app.get('/', (req, res) => {
   });
 });
 
-// API routes
-router.post('/api/upload', upload.array('images', 5), async (req, res) => {
-  try {
-    const files = req.files;
-    if (!files || files.length === 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'No files uploaded',
-      });
-    }
-    const urls = files.map((file) => `http://localhost:5001/uploads/${file.filename}`);
-    res.status(200).json({
-      status: 'success',
-      data: { urls },
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: `Failed to upload images: ${error.message}`,
-    });
-  }
-});
-router.post('/api/createhospital', createHospital);
+
+router.post('/api/createhospital',  upload.array('images'), createHospital);
 router.put('/api/updatehospital', updateHospital);
-router.delete('/api/deletehospital', deleteHospital);
-router.get("/api/getHospitalAdmins", getHospitalAdmins)
+router.delete('/api/deletehospital/:id', deleteHospital);
+router.get("/api/getHospitalAdmins", getHospitalAdmins);
+router.get("/api/getAdmin/:id", getHospitalAdmin);
 router.get('/api/hospital', getHospital);
 router.get('/api/hospitals', getAllHospitals);
 router.get('/api/hospital/search', getSearchedHospitals);
+router.post('/api/uploadImages', upload.array('images'), uploadImages);
 
 router.post('/api/createAppointment', createAppointment);
 router.get('/api/getMyAppointments/mine', getMyAppointments);

@@ -45,7 +45,7 @@ router.post('/upload', upload.array('images', 5), async (req, res) => {
         message: 'No files uploaded',
       });
     }
-    const urls = files.map((file) => `http://localhost:5001/uploads/${file.filename}`);
+    const urls = files.map((file) => `${process.env.NEXT_PUBLIC_BACKEND_URL}/uploads/${file.filename}`);
     res.status(200).json({
       status: 'success',
       data: { urls },

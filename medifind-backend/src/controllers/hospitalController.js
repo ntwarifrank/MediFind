@@ -1,46 +1,63 @@
-import { Router } from 'express';
 import Hospital from '../models/Hospital.js';
 import User from '../models/User.js';
 import Admin from '../models/hospitalAdmin.js';
 import mongoose from 'mongoose';
 import {v2 as cloudinary} from "cloudinary";
+import dotenv from 'dotenv';
+dotenv.config();
 
-// Cloudinary configuration 
+// Add this at the VERY TOP of your server's entry file (app.js/server.js)
+console.log("Environment Variables:", {
+  PORT: process.env.PORT,
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ? "***exists***" : "MISSING",
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? "***exists***" : "MISSING"
+});
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const router = Router();
-
 // Image upload route
 export const uploadImages = async (req, res) => {
+  // Verify Cloudinary config
+  if (!cloudinary.config().api_key) {
+    console.error("Cloudinary not configured!");
+    return res.status(500).json({
+      success: false,
+      message: "Server configuration error"
+    });
+  }
+
   try {
-    if (!req.files || req.files.length === 0) {
+    if (!req.files?.length) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'No files uploaded',
+        success: false,
+        message: 'No files uploaded'
       });
     }
 
-    const uploadPromises = req.files.map(file => {
-      return cloudinary.uploader.upload(file.path, {
+    const urls = [];
+    for (const file of req.files) {
+      const result = await cloudinary.uploader.upload(file.path, {
         folder: 'hospitals'
       });
+      urls.push(result.secure_url);
+    }
+
+    return res.status(200).json({
+      success: true,
+      urls
     });
 
-    const results = await Promise.all(uploadPromises);
-    const urls = results.map(result => result.secure_url);
-
-    res.status(200).json({
-      status: 'success',
-      data: { urls },
-    });
   } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: `Failed to upload images: ${error.message}`,
+    console.error('Upload error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload images',
+      error: error.message
     });
   }
 };
@@ -458,15 +475,26 @@ export const updateHospital = async (req, res) => {
 
 // Delete hospital
 export const deleteHospital = async (req, res) => {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+  const { id } = req.params;
+  console.log("hospital id to b deleted" + id);
+  try { 
+
+    if (!id) {
       return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid hospital ID',
+        success: false,
+        message: 'No ID provided'
       });
     }
-    
-    const hospital = await Hospital.findById(req.params.id);
+
+    // Validate MongoDB ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format'
+      });
+    }
+
+    const hospital = await Hospital.findById({_id: id});
     if (!hospital) {
       return res.status(404).json({
         status: 'fail',
@@ -539,7 +567,7 @@ export const getSearchedHospitals = async (req, res) => {
 export const getHospitalAdmins = async(req, res) => {
 
   try {
-        const admins = await Admin.find({ role: 'hospital_admin'});
+        const admins = await Admin.find();
 
       if(admins){
         res.status(201).json({ sucess: true, message:"admins Fetched", Admins : admins })
@@ -552,4 +580,41 @@ export const getHospitalAdmins = async(req, res) => {
     
   }
 
+}
+
+
+export const getHospitalAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid admin ID format"
+      });
+    }
+
+    const admin = await Admin.findById(id).select('adminName email phone hospitalName');
+    
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      Admin: admin // Consistent casing (Admin vs admin)
+    });
+
+  } catch (error) {
+    console.error('Error fetching admin:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 }
