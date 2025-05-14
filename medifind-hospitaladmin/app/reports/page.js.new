@@ -1,0 +1,222 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import DashboardLayout from '../../components/layout/DashboardLayout';
+import { useAuth } from '../../context/AuthContext';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
+import { Line, Bar } from 'react-chartjs-2';
+
+// Register ChartJS components
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
+
+export default function ReportsPage() {
+  const { user } = useAuth();
+  const hospitalId = user?.hospitalId;
+  
+  // State for UI controls
+  const [activeReportType, setActiveReportType] = useState('financial');
+  const [timePeriod, setTimePeriod] = useState('month');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [startDate, setStartDate] = useState('2025-04-01');
+  const [endDate, setEndDate] = useState('2025-05-06');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState('pdf');
+  const [exportInProgress, setExportInProgress] = useState(false);
+  
+  // Data loading state
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
+  // Report data from API
+  const [financialData, setFinancialData] = useState(null);
+  const [patientStats, setPatientStats] = useState(null);
+  const [departmentPerformance, setDepartmentPerformance] = useState(null);
+  
+  // Fetch reports data from backend API
+  useEffect(() => {
+    if (!hospitalId) return;
+    
+    const fetchReportsData = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch financial data
+        const financialResponse = await axios.get('/api/reports/financial', {
+          params: { 
+            hospital: hospitalId,
+            startDate,
+            endDate
+          }
+        });
+        
+        // Fetch patient statistics
+        const patientResponse = await axios.get('/api/reports/patients', {
+          params: { 
+            hospital: hospitalId,
+            startDate,
+            endDate
+          }
+        });
+        
+        // Fetch department performance
+        const departmentResponse = await axios.get('/api/reports/departments', {
+          params: { 
+            hospital: hospitalId,
+            startDate,
+            endDate
+          }
+        });
+        
+        // Set data from API responses
+        setFinancialData(financialResponse.data.data.financialData);
+        setPatientStats(patientResponse.data.data.patientStats);
+        setDepartmentPerformance(departmentResponse.data.data.departmentPerformance);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching reports data:', err);
+        setError('Failed to load reports data. Please try again later.');
+        
+        // Fallback to sample data for demo purposes
+        setFinancialData({
+          revenue: {
+            total: 1250000,
+            byDepartment: {
+              cardiology: 320000,
+              neurology: 280000,
+              orthopedics: 250000,
+              pediatrics: 180000,
+              dermatology: 120000,
+              ophthalmology: 100000,
+            },
+            byMonth: {
+              'Jan': 95000,
+              'Feb': 98000,
+              'Mar': 105000,
+              'Apr': 110000,
+            }
+          },
+          expenses: {
+            total: 850000,
+            byCategory: {
+              salaries: 450000,
+              medications: 150000,
+              equipment: 120000,
+              utilities: 80000,
+              maintenance: 50000,
+            },
+            byMonth: {
+              'Jan': 70000,
+              'Feb': 72000,
+              'Mar': 75000,
+              'Apr': 78000,
+            }
+          },
+          profit: {
+            total: 400000,
+            byMonth: {
+              'Jan': 25000,
+              'Feb': 26000,
+              'Mar': 30000,
+              'Apr': 32000,
+            }
+          }
+        });
+        
+        setPatientStats({
+          totalPatients: 12500,
+          newPatients: {
+            total: 450,
+            byMonth: {
+              'Jan': 110,
+              'Feb': 105,
+              'Mar': 120,
+              'Apr': 115,
+            }
+          },
+          appointments: {
+            total: 3200,
+            completed: 2800,
+            cancelled: 250,
+            noShow: 150,
+            byDepartment: {
+              cardiology: 650,
+              neurology: 580,
+              orthopedics: 520,
+              pediatrics: 480,
+              dermatology: 320,
+              ophthalmology: 250,
+            }
+          },
+          admissions: {
+            total: 850,
+            emergency: 320,
+            planned: 530,
+            averageStay: 4.2,
+            byDepartment: {
+              cardiology: 220,
+              neurology: 180,
+              orthopedics: 150,
+              pediatrics: 120,
+              dermatology: 80,
+              ophthalmology: 100,
+            }
+          }
+        });
+        
+        setDepartmentPerformance({
+          cardiology: {
+            revenue: 320000,
+            expenses: 220000,
+            profit: 100000,
+            patientsSeen: 650,
+            averageRating: 4.7,
+            topProcedures: ['ECG', 'Echocardiogram', 'Stress Test', 'Cardiac Catheterization']
+          },
+          neurology: {
+            revenue: 280000,
+            expenses: 190000,
+            profit: 90000,
+            patientsSeen: 580,
+            averageRating: 4.5,
+            topProcedures: ['EEG', 'MRI', 'Lumbar Puncture', 'EMG']
+          },
+          orthopedics: {
+            revenue: 250000,
+            expenses: 170000,
+            profit: 80000,
+            patientsSeen: 520,
+            averageRating: 4.6,
+            topProcedures: ['Joint Replacement', 'Fracture Repair', 'Arthroscopy', 'Physical Therapy']
+          },
+          pediatrics: {
+            revenue: 180000,
+            expenses: 130000,
+            profit: 50000,
+            patientsSeen: 480,
+            averageRating: 4.8,
+            topProcedures: ['Vaccinations', 'Well-Child Visits', 'Ear Infection Treatment', 'Asthma Management']
+          },
+          dermatology: {
+            revenue: 120000,
+            expenses: 80000,
+            profit: 40000,
+            patientsSeen: 320,
+            averageRating: 4.4,
+            topProcedures: ['Skin Biopsy', 'Acne Treatment', 'Mole Removal', 'Eczema Treatment']
+          },
+          ophthalmology: {
+            revenue: 100000,
+            expenses: 70000,
+            profit: 30000,
+            patientsSeen: 250,
+            averageRating: 4.5,
+            topProcedures: ['Eye Exam', 'Cataract Surgery', 'Glaucoma Treatment', 'LASIK']
+          }
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchReportsData();
+  }, [hospitalId, startDate, endDate]);

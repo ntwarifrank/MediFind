@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+     --mainBlue:"#3A8EF6";
+     --deepBlue: "#6F3AFA";
+     --mainWhite: "#FFFFFF";
+     --DarkBlue: "#031432";
+     --mainGray: "#6C87AE";
+     --whiteGray: "#E2EDFF";
+}
+
+body {
+     background-color: var(--mainWhite);
+     color:var(--mainBlue);
+}
