@@ -181,3 +181,11 @@ process.on('unhandledRejection', (err) => {
   console.error(err.name, err.message);
   process.exit(1);
 });
+
+
+app.get('/', (req, res) => {
+  res.send('Hello from Express on Vercel!');
+});
+
+// Export the Express app
+export default app;
